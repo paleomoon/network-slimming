@@ -144,13 +144,19 @@ conv_count = 0
 for layer_id in range(len(old_modules)):
     m0 = old_modules[layer_id]
     m1 = new_modules[layer_id]
+    # 对BN层和ConV层都要剪枝
     if isinstance(m0, nn.BatchNorm2d):
+        # np.squeeze 从数组的形状中删除单维度条目，即把shape中为1的维度去掉
+        # np.argwhere(a) 返回非0的数组元组的索引，其中a是要索引数组的条件。
         idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
+        # 如果维度是1，那么就新增一维，这是为了和BN层的weight的维度匹配
         if idx1.size == 1:
             idx1 = np.resize(idx1,(1,))
 
+        # 如果下一层是通道选择层，这个是ResNet和VGG剪枝的唯一不同之处
         if isinstance(old_modules[layer_id + 1], channel_selection):
             # If the next layer is the channel selection layer, then the current batchnorm 2d layer won't be pruned.
+            # 如果下一层是通道选择层，这一层就不剪枝
             m1.weight.data = m0.weight.data.clone()
             m1.bias.data = m0.bias.data.clone()
             m1.running_mean = m0.running_mean.clone()
@@ -166,6 +172,7 @@ for layer_id in range(len(old_modules)):
             if layer_id_in_cfg < len(cfg_mask):
                 end_mask = cfg_mask[layer_id_in_cfg]
         else:
+            # 否则正常剪枝
             m1.weight.data = m0.weight.data[idx1.tolist()].clone()
             m1.bias.data = m0.bias.data[idx1.tolist()].clone()
             m1.running_mean = m0.running_mean[idx1.tolist()].clone()
@@ -179,6 +186,7 @@ for layer_id in range(len(old_modules)):
             m1.weight.data = m0.weight.data.clone()
             conv_count += 1
             continue
+        # 正常剪枝就好
         if isinstance(old_modules[layer_id-1], channel_selection) or isinstance(old_modules[layer_id-1], nn.BatchNorm2d):
             # This convers the convolutions in the residual block.
             # The convolutions are either after the channel selection layer or after the batch normalization layer.

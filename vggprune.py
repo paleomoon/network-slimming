@@ -47,11 +47,14 @@ if args.model:
         print("=> no checkpoint found at '{}'".format(args.model))
 
 print(model)
+
+# 计算需要剪枝的变量个数total
 total = 0
 for m in model.modules():
     if isinstance(m, nn.BatchNorm2d):
         total += m.weight.data.shape[0]
 
+# 确定剪枝的全局阈值
 bn = torch.zeros(total)
 index = 0
 for m in model.modules():
@@ -60,17 +63,23 @@ for m in model.modules():
         bn[index:(index+size)] = m.weight.data.abs().clone()
         index += size
 
+# 按照权值大小排序
 y, i = torch.sort(bn)
 thre_index = int(total * args.percent)
+# 确定要剪枝的阈值
 thre = y[thre_index]
 
+#********************************预剪枝*********************************#
 pruned = 0
 cfg = []
+# 剪枝后的网络每层的通道数
 cfg_mask = []
 for k, m in enumerate(model.modules()):
     if isinstance(m, nn.BatchNorm2d):
         weight_copy = m.weight.data.abs().clone()
+        # 要保留的通道标记Mask图
         mask = weight_copy.gt(thre).float().cuda()
+        # 剪枝掉的通道数个数
         pruned = pruned + mask.shape[0] - torch.sum(mask)
         m.weight.data.mul_(mask)
         m.bias.data.mul_(mask)
@@ -132,11 +141,16 @@ with open(savepath, "w") as fp:
     fp.write("Test accuracy: \n"+str(acc))
 
 layer_id_in_cfg = 0
+# 定义原始模型和新模型的每一层保留通道索引的mask
 start_mask = torch.ones(3)
 end_mask = cfg_mask[layer_id_in_cfg]
 for [m0, m1] in zip(model.modules(), newmodel.modules()):
+    # 对BN层和ConV层都要剪枝
     if isinstance(m0, nn.BatchNorm2d):
+        # np.squeeze 从数组的形状中删除单维度条目，即把shape中为1的维度去掉
+        # np.argwhere(a) 返回非0的数组元组的索引，其中a是要索引数组的条件。
         idx1 = np.squeeze(np.argwhere(np.asarray(end_mask.cpu().numpy())))
+        # 如果维度是1，那么就新增一维，这是为了和BN层的weight的维度匹配
         if idx1.size == 1:
             idx1 = np.resize(idx1,(1,))
         m1.weight.data = m0.weight.data[idx1.tolist()].clone()
@@ -144,6 +158,7 @@ for [m0, m1] in zip(model.modules(), newmodel.modules()):
         m1.running_mean = m0.running_mean[idx1.tolist()].clone()
         m1.running_var = m0.running_var[idx1.tolist()].clone()
         layer_id_in_cfg += 1
+        # 注意start_mask在end_mask的前一层，这个会在裁剪Conv2d的时候用到
         start_mask = end_mask.clone()
         if layer_id_in_cfg < len(cfg_mask):  # do not change in Final FC
             end_mask = cfg_mask[layer_id_in_cfg]
@@ -155,10 +170,12 @@ for [m0, m1] in zip(model.modules(), newmodel.modules()):
             idx0 = np.resize(idx0, (1,))
         if idx1.size == 1:
             idx1 = np.resize(idx1, (1,))
+        # 注意卷积核Tensor维度为[n, c, w, h]，两个卷积层连接，下一层的输入维度n就等于当前层的c
         w1 = m0.weight.data[:, idx0.tolist(), :, :].clone()
         w1 = w1[idx1.tolist(), :, :, :].clone()
         m1.weight.data = w1.clone()
     elif isinstance(m0, nn.Linear):
+        # 注意卷积核Tensor维度为[n, c, w, h]，两个卷积层连接，下一层的输入维度n'就等于当前层的c
         idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
         if idx0.size == 1:
             idx0 = np.resize(idx0, (1,))

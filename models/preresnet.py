@@ -16,6 +16,7 @@ class Bottleneck(nn.Module):
     def __init__(self, inplanes, planes, cfg, stride=1, downsample=None):
         super(Bottleneck, self).__init__()
         self.bn1 = nn.BatchNorm2d(inplanes)
+        # 新增的通道鉴别层，放在BN之后
         self.select = channel_selection(inplanes)
         self.conv1 = nn.Conv2d(cfg[0], cfg[1], kernel_size=1, bias=False)
         self.bn2 = nn.BatchNorm2d(cfg[1])
@@ -71,6 +72,7 @@ class resnet(nn.Module):
         self.layer2 = self._make_layer(block, 32, n, cfg = cfg[3*n:6*n], stride=2)
         self.layer3 = self._make_layer(block, 64, n, cfg = cfg[6*n:9*n], stride=2)
         self.bn = nn.BatchNorm2d(64 * block.expansion)
+        # 新增的通道鉴别层，放在BN之后
         self.select = channel_selection(64 * block.expansion)
         self.relu = nn.ReLU(inplace=True)
         self.avgpool = nn.AvgPool2d(8)

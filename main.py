@@ -16,8 +16,10 @@ import models
 parser = argparse.ArgumentParser(description='PyTorch Slimming CIFAR training')
 parser.add_argument('--dataset', type=str, default='cifar100',
                     help='training dataset (default: cifar100)')
+# 是否进行通道稀疏正则化训练
 parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true',
                     help='train with channel sparsity regularization')
+# 缩放因子，即BN层的缩放系数
 parser.add_argument('--s', type=float, default=0.0001,
                     help='scale sparse rate (default: 0.0001)')
 parser.add_argument('--refine', default='', type=str, metavar='PATH',
@@ -122,6 +124,7 @@ if args.resume:
     else:
         print("=> no checkpoint found at '{}'".format(args.resume))
 
+# 稀疏诱导惩罚项的梯度下降
 # additional subgradient descent on the sparsity-induced penalty term
 def updateBN():
     for m in model.modules():
