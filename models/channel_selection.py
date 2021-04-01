@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-
+# 通道鉴别层放在每一个残差模块的第一个BN层后面以及整个网络的最后一个BN层后面，作用是为了保持主干道通道一致。没有完全理解。。。
 class channel_selection(nn.Module):
     """
     Select channels from the output of BatchNorm2d layer. It should be put directly after BatchNorm2d layer.

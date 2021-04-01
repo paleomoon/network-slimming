@@ -10,6 +10,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 import models
+from count_flops import count
 
 
 # Training settings
@@ -19,7 +20,7 @@ parser.add_argument('--dataset', type=str, default='cifar100',
 # 是否进行通道稀疏正则化训练
 parser.add_argument('--sparsity-regularization', '-sr', dest='sr', action='store_true',
                     help='train with channel sparsity regularization')
-# 缩放因子，即BN层的缩放系数
+# 损失函数的稀疏正则项系数
 parser.add_argument('--s', type=float, default=0.0001,
                     help='scale sparse rate (default: 0.0001)')
 parser.add_argument('--refine', default='', type=str, metavar='PATH',
@@ -63,7 +64,7 @@ if args.cuda:
 if not os.path.exists(args.save):
     os.makedirs(args.save)
 
-kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
+kwargs = {'num_workers': 8, 'pin_memory': True} if args.cuda else {}
 if args.dataset == 'cifar10':
     train_loader = torch.utils.data.DataLoader(
         datasets.CIFAR10('./data.cifar10', train=True, download=True,
@@ -99,12 +100,18 @@ else:
                        ])),
         batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
+# 如果进行微调
 if args.refine:
     checkpoint = torch.load(args.refine)
+    # __dict__[]取得属性名对应的值
     model = models.__dict__[args.arch](dataset=args.dataset, depth=args.depth, cfg=checkpoint['cfg'])
-    model.load_state_dict(checkpoint['state_dict'])
+    model.load_state_dict(checkpoint['state_dict']) # 加载稀疏化训练的权重
 else:
     model = models.__dict__[args.arch](dataset=args.dataset, depth=args.depth)
+
+flops, params = count(model)
+print('FLOPs = ' + str(flops/1000**3) + 'G')
+print('Params = ' + str(params/1000**2) + 'M')
 
 if args.cuda:
     model.cuda()
@@ -124,12 +131,13 @@ if args.resume:
     else:
         print("=> no checkpoint found at '{}'".format(args.resume))
 
+
 # 稀疏诱导惩罚项的梯度下降
 # additional subgradient descent on the sparsity-induced penalty term
 def updateBN():
     for m in model.modules():
         if isinstance(m, nn.BatchNorm2d):
-            m.weight.grad.data.add_(args.s*torch.sign(m.weight.data))  # L1
+            m.weight.grad.data.add_(args.s*torch.sign(m.weight.data))  # torch.sign()即符号函数，根据论文使用L1范数（绝对值之和），abs()的导数即sign()。https://github.com/Eric-mingjie/network-slimming/issues/31
 
 def train(epoch):
     model.train()
@@ -139,29 +147,30 @@ def train(epoch):
         data, target = Variable(data), Variable(target)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.cross_entropy(output, target)
+        loss = F.cross_entropy(output, target) # loss增加稀疏正则项和在训练时单独更新稀疏正则项梯度，二者是等价的。所以这里不再添加稀疏正则项。
         pred = output.data.max(1, keepdim=True)[1]
         loss.backward()
         if args.sr:
-            updateBN()
+            updateBN() # 梯度下降更新后再单独更新稀疏正则项
         optimizer.step()
         if batch_idx % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.1f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.data[0]))
+                100. * batch_idx / len(train_loader), loss.item()))
 
 def test():
-    model.eval()
+    # model.eval()
     test_loss = 0
     correct = 0
-    for data, target in test_loader:
-        if args.cuda:
-            data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        output = model(data)
-        test_loss += F.cross_entropy(output, target, size_average=False).data[0] # sum up batch loss
-        pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
-        correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+    with torch.no_grad():
+        for data, target in test_loader:
+            if args.cuda:
+                data, target = data.cuda(), target.cuda()
+            # data, target = Variable(data, volatile=True), Variable(target)
+            output = model(data)
+            test_loss += F.cross_entropy(output, target, size_average=False).item() # sum up batch loss
+            pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
+            correct += pred.eq(target.data.view_as(pred)).cpu().sum()
 
     test_loss /= len(test_loader.dataset)
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.1f}%)\n'.format(
@@ -174,20 +183,21 @@ def save_checkpoint(state, is_best, filepath):
     if is_best:
         shutil.copyfile(os.path.join(filepath, 'checkpoint.pth.tar'), os.path.join(filepath, 'model_best.pth.tar'))
 
-best_prec1 = 0.
-for epoch in range(args.start_epoch, args.epochs):
-    if epoch in [args.epochs*0.5, args.epochs*0.75]:
-        for param_group in optimizer.param_groups:
-            param_group['lr'] *= 0.1
-    train(epoch)
-    prec1 = test()
-    is_best = prec1 > best_prec1
-    best_prec1 = max(prec1, best_prec1)
-    save_checkpoint({
-        'epoch': epoch + 1,
-        'state_dict': model.state_dict(),
-        'best_prec1': best_prec1,
-        'optimizer': optimizer.state_dict(),
-    }, is_best, filepath=args.save)
+if __name__ == '__main__':
+    best_prec1 = 0.
+    for epoch in range(args.start_epoch, args.epochs):
+        if epoch in [args.epochs*0.5, args.epochs*0.75]:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] *= 0.1
+        train(epoch)
+        prec1 = test()
+        is_best = prec1 > best_prec1
+        best_prec1 = max(prec1, best_prec1)
+        save_checkpoint({
+            'epoch': epoch + 1,
+            'state_dict': model.state_dict(),
+            'best_prec1': best_prec1,
+            'optimizer': optimizer.state_dict(),
+        }, is_best, filepath=args.save)
 
-print("Best accuracy: "+str(best_prec1))
+    print("Best accuracy: {:.4f}".format(best_prec1))

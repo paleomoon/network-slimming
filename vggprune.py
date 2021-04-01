@@ -52,15 +52,15 @@ print(model)
 total = 0
 for m in model.modules():
     if isinstance(m, nn.BatchNorm2d):
-        total += m.weight.data.shape[0]
+        total += m.weight.data.shape[0] # BN层weight就是γ，bias就是β，weight的shape[0]就是卷积层out_channels
 
 # 确定剪枝的全局阈值
-bn = torch.zeros(total)
+bn = torch.zeros(total) # total个0
 index = 0
 for m in model.modules():
     if isinstance(m, nn.BatchNorm2d):
         size = m.weight.data.shape[0]
-        bn[index:(index+size)] = m.weight.data.abs().clone()
+        bn[index:(index+size)] = m.weight.data.abs().clone() # γ的绝对值
         index += size
 
 # 按照权值大小排序
@@ -71,17 +71,16 @@ thre = y[thre_index]
 
 #********************************预剪枝*********************************#
 pruned = 0
-cfg = []
-# 剪枝后的网络每层的通道数
-cfg_mask = []
+cfg = [] # 记录每层要保留的通道数
+cfg_mask = [] # 记录剪枝后每层的通道mask图
 for k, m in enumerate(model.modules()):
     if isinstance(m, nn.BatchNorm2d):
         weight_copy = m.weight.data.abs().clone()
         # 要保留的通道标记Mask图
-        mask = weight_copy.gt(thre).float().cuda()
+        mask = weight_copy.gt(thre).float().cuda() # touch.gt() means greater than，要保留的为1，要剪掉的为0
         # 剪枝掉的通道数个数
-        pruned = pruned + mask.shape[0] - torch.sum(mask)
-        m.weight.data.mul_(mask)
+        pruned = pruned + mask.shape[0] - torch.sum(mask) # 总通道数-要保留的通道数=剪掉的通道数
+        m.weight.data.mul_(mask) # 
         m.bias.data.mul_(mask)
         cfg.append(int(torch.sum(mask)))
         cfg_mask.append(mask.clone())
@@ -133,14 +132,14 @@ newmodel = vgg(dataset=args.dataset, cfg=cfg)
 if args.cuda:
     newmodel.cuda()
 
-num_parameters = sum([param.nelement() for param in newmodel.parameters()])
+num_parameters = sum([param.nelement() for param in newmodel.parameters()]) # 计算参数量
 savepath = os.path.join(args.save, "prune.txt")
 with open(savepath, "w") as fp:
     fp.write("Configuration: \n"+str(cfg)+"\n")
     fp.write("Number of parameters: \n"+str(num_parameters)+"\n")
     fp.write("Test accuracy: \n"+str(acc))
 
-layer_id_in_cfg = 0
+layer_id_in_cfg = 0 # 层序号
 # 定义原始模型和新模型的每一层保留通道索引的mask
 start_mask = torch.ones(3)
 end_mask = cfg_mask[layer_id_in_cfg]
@@ -175,7 +174,7 @@ for [m0, m1] in zip(model.modules(), newmodel.modules()):
         w1 = w1[idx1.tolist(), :, :, :].clone()
         m1.weight.data = w1.clone()
     elif isinstance(m0, nn.Linear):
-        # 注意卷积核Tensor维度为[n, c, w, h]，两个卷积层连接，下一层的输入维度n'就等于当前层的c
+        # 注意卷积核Tensor维度为[n, c, w, h]，两个卷积层连接，下一层的输入维度n就等于当前层的c
         idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
         if idx0.size == 1:
             idx0 = np.resize(idx0, (1,))
@@ -187,3 +186,9 @@ torch.save({'cfg': cfg, 'state_dict': newmodel.state_dict()}, os.path.join(args.
 print(newmodel)
 model = newmodel
 test(model)
+
+from count_flops import count
+flops, params = count(model)
+print('FLOPs = ' + str(flops/1000**3) + 'G')
+print('Params = ' + str(params/1000**2) + 'M')
+

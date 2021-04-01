@@ -35,13 +35,18 @@ model = resnet(depth=args.depth, dataset=args.dataset)
 
 if args.cuda:
     model.cuda()
+
+# params=model.state_dict() #获得模型的原始状态以及参数。
+# for k,v in params.items():
+#     print(k) #只打印key值，不打印具体参数。
+
 if args.model:
     if os.path.isfile(args.model):
         print("=> loading checkpoint '{}'".format(args.model))
         checkpoint = torch.load(args.model)
         args.start_epoch = checkpoint['epoch']
         best_prec1 = checkpoint['best_prec1']
-        model.load_state_dict(checkpoint['state_dict'])
+        model.load_state_dict(checkpoint['state_dict'],strict=False)
         print("=> loaded checkpoint '{}' (epoch {}) Prec1: {:f}"
               .format(args.model, checkpoint['epoch'], best_prec1))
     else:
@@ -89,7 +94,7 @@ print('Pre-processing Successful!')
 
 # simple test model after Pre-processing prune (simple set BN scales to zeros)
 def test(model):
-    kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
+    kwargs = {'num_workers': 8, 'pin_memory': True} if args.cuda else {}
     if args.dataset == 'cifar10':
         test_loader = torch.utils.data.DataLoader(
             datasets.CIFAR10('./data.cifar10', train=False, transform=transforms.Compose([
@@ -223,3 +228,8 @@ torch.save({'cfg': cfg, 'state_dict': newmodel.state_dict()}, os.path.join(args.
 print(newmodel)
 model = newmodel
 test(model)
+
+from count_flops import count
+flops, params = count(model)
+print('FLOPs = ' + str(flops/1000**3) + 'G')
+print('Params = ' + str(params/1000**2) + 'M')
