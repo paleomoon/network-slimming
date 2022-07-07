@@ -40,7 +40,7 @@ if args.model:
         checkpoint = torch.load(args.model)
         args.start_epoch = checkpoint['epoch']
         best_prec1 = checkpoint['best_prec1']
-        model.load_state_dict(checkpoint['state_dict'])
+        model.load_state_dict(checkpoint['state_dict'],strict=False)
         print("=> loaded checkpoint '{}' (epoch {}) Prec1: {:f}"
               .format(args.model, checkpoint['epoch'], best_prec1))
     else:
@@ -72,7 +72,7 @@ thre = y[thre_index]
 
 #********************************预剪枝*********************************#
 pruned = 0
-cfg = [] # 记录每个层要保留的通道数
+cfg = [] # 记录每个层要保留的通道数，pooling用M表示
 cfg_mask = [] # 记录剪枝后每个BN层的通道mask图
 for k, m in enumerate(model.modules()):
     if isinstance(m, nn.BatchNorm2d):
@@ -143,7 +143,7 @@ with open(savepath, "w") as fp:
 
 layer_id_in_cfg = 0 # BN层序号
 # 定义原始模型和新模型的每一层保留通道索引的mask
-start_mask = torch.ones(3) # 当前层剪枝前的mask,开始图像三通道都保留。如果前一层有剪枝，则前一层剪枝完后需要修改下一层的start_mask，这样层之间才能连续。
+start_mask = torch.ones(3) # 当前层剪枝前的mask,开始图像三通道都保留。如果前一层有剪枝，则前一层剪枝完后需要修改下一层的start_mask作为输入，这样层之间才能连续。
 end_mask = cfg_mask[layer_id_in_cfg] # 当前层剪枝后的mask
 for [m0, m1] in zip(model.modules(), newmodel.modules()):
     # 对BN层和ConV层都要剪枝。定义的VGG模型每个ConV层后接BN
@@ -171,12 +171,12 @@ for [m0, m1] in zip(model.modules(), newmodel.modules()):
             idx0 = np.resize(idx0, (1,))
         if idx1.size == 1:
             idx1 = np.resize(idx1, (1,))
-        # 注意卷积核Tensor维度为[n, c, w, h]，VGG两个卷积层连接，下一层的输入维度n就等于当前层的c
-        w1 = m0.weight.data[:, idx0.tolist(), :, :].clone() # 使与前面的层保持一致
-        w1 = w1[idx1.tolist(), :, :, :].clone() # 这里有问题？？？
+        # 注意卷积核Tensor维度为[n, c, w, h]，n代表卷积核个数（输出通道），c代表每个卷积核通道（输入通道），当两个卷积层连接时，当前层的输入通道c等于前面层的输出通道n
+        w1 = m0.weight.data[:, idx0.tolist(), :, :].clone() # 当前层的输入通道应用前面层的mask，使与前面的层保持一致
+        w1 = w1[idx1.tolist(), :, :, :].clone() # 因为卷积核与其后面的BN通道一致，应用相同的mask
         m1.weight.data = w1.clone()
     elif isinstance(m0, nn.Linear):
-        # 注意卷积核Tensor维度为[n, c, w, h]，两个卷积层连接，下一层的输入维度n就等于当前层的c
+        # Linear层的Tensor维度为[n, c]，当前层的输入通道c等于前面层的输出通道n
         idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
         if idx0.size == 1:
             idx0 = np.resize(idx0, (1,))

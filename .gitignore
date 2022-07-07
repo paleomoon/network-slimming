@@ -1,4 +1,4 @@
-﻿.vscode*
+﻿.vscode/launch.json
 __pycache__*
 data.cifar10/
 *.tar

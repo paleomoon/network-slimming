@@ -7,7 +7,7 @@ from .channel_selection import channel_selection
 __all__ = ['resnet']
 
 """
-preactivation resnet with bottleneck design.
+preactivation resnet with bottleneck design. resnetv2 BN在卷积层之前作为pre-activation，起到了正则化的作用
 """
 
 class Bottleneck(nn.Module):
@@ -107,11 +107,11 @@ class resnet(nn.Module):
     def forward(self, x):
         x = self.conv1(x)
 
-        x = self.layer1(x)  # 32x32
+        x = self.layer1(x)  # 32x32 每个Bottleneck中第一个BN后有channel_selection
         x = self.layer2(x)  # 16x16
         x = self.layer3(x)  # 8x8
         x = self.bn(x)
-        x = self.select(x) # 新增的通道鉴别层，放在BN之后
+        x = self.select(x) # 整个网络最后一个BN后有channel_selection
         x = self.relu(x)
 
         x = self.avgpool(x)

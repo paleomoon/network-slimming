@@ -1,0 +1,6 @@
+Configuration: 
+[62, 64, 'M', 128, 128, 'M', 256, 256, 'M', 424, 122, 'M', 13, 313]
+Number of parameters: 
+2643321
+Test accuracy: 
+tensor(0.1765)

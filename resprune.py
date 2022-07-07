@@ -161,15 +161,16 @@ for layer_id in range(len(old_modules)):
         # 如果下一层是通道选择层，这个是ResNet和VGG剪枝的唯一不同之处
         if isinstance(old_modules[layer_id + 1], channel_selection):
             # If the next layer is the channel selection layer, then the current batchnorm 2d layer won't be pruned.
-            # 如果下一层是通道选择层，这一层就不剪枝
+            # 如果下一层是通道选择层，这一层BN就不剪枝
             m1.weight.data = m0.weight.data.clone()
             m1.bias.data = m0.bias.data.clone()
             m1.running_mean = m0.running_mean.clone()
             m1.running_var = m0.running_var.clone()
 
             # We need to set the channel selection layer.
+            # indexes设置为1
             m2 = new_modules[layer_id + 1]
-            m2.indexes.data.zero_()
+            m2.indexes.data.zero_() # 设为0
             m2.indexes.data[idx1.tolist()] = 1.0
 
             layer_id_in_cfg += 1
@@ -187,11 +188,12 @@ for layer_id in range(len(old_modules)):
             if layer_id_in_cfg < len(cfg_mask):  # do not change in Final FC
                 end_mask = cfg_mask[layer_id_in_cfg]
     elif isinstance(m0, nn.Conv2d):
+        # 第一个卷积层不剪枝
         if conv_count == 0:
             m1.weight.data = m0.weight.data.clone()
             conv_count += 1
             continue
-        # 正常剪枝就好
+        # 当前卷积的上一层是channel_selection或BN层，正常剪枝就好
         if isinstance(old_modules[layer_id-1], channel_selection) or isinstance(old_modules[layer_id-1], nn.BatchNorm2d):
             # This convers the convolutions in the residual block.
             # The convolutions are either after the channel selection layer or after the batch normalization layer.
@@ -207,6 +209,7 @@ for layer_id in range(len(old_modules)):
 
             # If the current convolution is not the last convolution in the residual block, then we can change the 
             # number of output channels. Currently we use `conv_count` to detect whether it is such convolution.
+            # 如果当前卷积层不是Bottleneck的最后卷积层，我们才进行剪枝。也就是说只对Bottleneck中间部分剪枝，Bottleneck输入输出保持通道不变，这样很方便
             if conv_count % 3 != 1:
                 w1 = w1[idx1.tolist(), :, :, :].clone()
             m1.weight.data = w1.clone()
@@ -214,6 +217,7 @@ for layer_id in range(len(old_modules)):
 
         # We need to consider the case where there are downsampling convolutions. 
         # For these convolutions, we just copy the weights.
+        # 下采样卷积层不剪枝
         m1.weight.data = m0.weight.data.clone()
     elif isinstance(m0, nn.Linear):
         idx0 = np.squeeze(np.argwhere(np.asarray(start_mask.cpu().numpy())))
