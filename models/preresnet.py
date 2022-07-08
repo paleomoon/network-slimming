@@ -7,7 +7,7 @@ from .channel_selection import channel_selection
 __all__ = ['resnet']
 
 """
-preactivation resnet with bottleneck design. resnetv2 BN在卷积层之前作为pre-activation，起到了正则化的作用
+preactivation resnet with bottleneck design. https://arxiv.org/abs/1603.05027 resnetv2 BN在卷积层之前作为pre-activation，起到了正则化的作用
 """
 
 class Bottleneck(nn.Module):

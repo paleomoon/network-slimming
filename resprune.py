@@ -161,7 +161,7 @@ for layer_id in range(len(old_modules)):
         # 如果下一层是通道选择层，这个是ResNet和VGG剪枝的唯一不同之处
         if isinstance(old_modules[layer_id + 1], channel_selection):
             # If the next layer is the channel selection layer, then the current batchnorm 2d layer won't be pruned.
-            # 如果下一层是通道选择层，这一层BN就不剪枝
+            # 如果下一层是通道选择层，这一层BN就不剪枝。如果这一BN层剪枝，那么更具代码逻辑它前面的Conv也要剪枝，这样Conv的输出通道变了，导致identify branch变化。不知道这样理解对不对？
             m1.weight.data = m0.weight.data.clone()
             m1.bias.data = m0.bias.data.clone()
             m1.running_mean = m0.running_mean.clone()
@@ -171,7 +171,7 @@ for layer_id in range(len(old_modules)):
             # indexes设置为1
             m2 = new_modules[layer_id + 1]
             m2.indexes.data.zero_() # 设为0
-            m2.indexes.data[idx1.tolist()] = 1.0
+            m2.indexes.data[idx1.tolist()] = 1.0 # 上一层BN不剪枝，但channel_selection层剪枝
 
             layer_id_in_cfg += 1
             start_mask = end_mask.clone()

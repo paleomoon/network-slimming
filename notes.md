@@ -1,8 +1,6 @@
 
 ## Baseline 
 
-The `dataset` argument specifies which dataset to use: `cifar10` or `cifar100`. The `arch` argument specifies the architecture to use: `vgg`,`resnet` or
-`densenet`. The depth is chosen to be the same as the networks used in the paper.
 ```shell
 python main.py --dataset cifar10 --arch vgg --depth 13 --batch-size 512 --epochs 99 --save ./vgg13/baseline
 python main.py --dataset cifar10 --arch resnet --depth 164 --batch-size 256 --epochs 99 --save ./resnet164/baseline
@@ -25,13 +23,6 @@ python resprune.py --dataset cifar10 --depth 164 --percent 0.4 --model ./resnet1
 python denseprune.py --dataset cifar10 --depth 40 --percent 0.4 --model [PATH TO THE MODEL] --save [DIRECTORY TO STORE RESULT]
 ```
 The pruned model will be named `pruned.pth.tar`.
-
-如果稀疏化训练保存模型之前使用了thop，在剪枝时会报错：Unexpected key(s) in state_dict: "total_ops", "total_params"。
-
-3种解决方法：1. 在保存模型后使用thop。 2. model.load_state_dict(checkpoint['state_dict'],strict=False)。 3. 手动过滤掉"total_ops", "total_params"等参数。
-
-参考：https://blog.csdn.net/daixiangzi/article/details/108368980 ， https://blog.csdn.net/qq_32998593/article/details/89343507
-
 
 
 ## Fine-tune
@@ -80,9 +71,18 @@ Note:
 | Top1 Accuracy (%) |  76.79   |            76.87             |        48.0        |         77.36        |  ---       |     ---     |
 |    Parameters     |  1.73M  |            1.73M            |        1.49M        |         1.49M         |---       |     ---     |
 
-Note: For results of pruning 60% of the channels for resnet164-cifar100, in this implementation, sometimes some layers are all pruned and there would be error. However, we also provide a [mask implementation](https://github.com/Eric-mingjie/network-slimming/tree/master/mask-impl) where we apply a mask to the scaling factor in BN layer. For mask implementaion, when pruning 60% of the channels in resnet164-cifar100, we can also train the pruned network.
+
 
 |  CIFAR100-Densenet-40  | Baseline |    Sparsity (1e-5) | Prune (40%) | Fine-tune-160(40%) | Prune(60%)  | Fine-tune-160(60%) |
 | :---------------: | :------: | :--------------------------: | :-----------------: | :-------------------: |:--------------------: | :-----------------:|
 | Top1 Accuracy (%) |  73.27   |          73.29            |        67.67        |         73.76         |   19.18       |     73.19     |
 |    Parameters     |  1.10M  |            1.10M            |        0.71M        |         0.71M         |  0.50M       |     0.50M    |
+
+
+mask-impl 的步骤是：
+
+1. 稀疏化训练
+2. 获得剪枝mask
+3. 用mask对上一步剪枝后的权重进行fine-tune
+
+这样只是将权重置零，不改变网络结构，并不会带来加速和模型文件大小的减小。mask-impl的意义是：即使一层全部被剪枝，也不会出错，因为只是权重被置0。

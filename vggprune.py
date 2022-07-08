@@ -72,7 +72,7 @@ thre = y[thre_index]
 
 #********************************预剪枝*********************************#
 pruned = 0
-cfg = [] # 记录每个层要保留的通道数，pooling用M表示
+cfg = [] # 记录每个BN层（也即前面的Conv层）要保留的通道数，pooling用M表示
 cfg_mask = [] # 记录剪枝后每个BN层的通道mask图
 for k, m in enumerate(model.modules()):
     if isinstance(m, nn.BatchNorm2d):
@@ -171,7 +171,7 @@ for [m0, m1] in zip(model.modules(), newmodel.modules()):
             idx0 = np.resize(idx0, (1,))
         if idx1.size == 1:
             idx1 = np.resize(idx1, (1,))
-        # 注意卷积核Tensor维度为[n, c, w, h]，n代表卷积核个数（输出通道），c代表每个卷积核通道（输入通道），当两个卷积层连接时，当前层的输入通道c等于前面层的输出通道n
+        # 注意卷积核Tensor维度为[n, c, h, w]，n代表卷积核个数（输出通道），c代表每个卷积核通道（输入通道），当两个卷积层连接时，当前层的输入通道c等于前面层的输出通道n
         w1 = m0.weight.data[:, idx0.tolist(), :, :].clone() # 当前层的输入通道应用前面层的mask，使与前面的层保持一致
         w1 = w1[idx1.tolist(), :, :, :].clone() # 因为卷积核与其后面的BN通道一致，应用相同的mask
         m1.weight.data = w1.clone()
